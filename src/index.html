@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Messaging App</title>
+</head>
+<body>
+    <div>
+        <h2>Register</h2>
+        <form id="registerForm">
+            <input type="text" id="registerUsername" placeholder="Username" required>
+            <input type="password" id="registerPassword" placeholder="Password" required>
+            <button type="submit">Register</button>
+        </form>
+    </div>
+
+    <div>
+        <h2>Login</h2>
+        <form id="loginForm">
+            <input type="text" id="loginUsername" placeholder="Username" required>
+            <input type="password" id="loginPassword" placeholder="Password" required>
+            <button type="submit">Login</button>
+        </form>
+    </div>
+
+
+    <h2>Select User</h2>
+    <div id="userList"></div>
+
+
+    <div id="chatContainer" style="display:none;">
+        <h2>Chat</h2>
+        <div id="messageList"></div>
+        <input type="text" id="messageInput" placeholder="Type your message here" />
+        <button id="sendMessage">Send</button>
+    </div>
+
+    <script>
+
+
+        let socket;
+        let token = ''; // Assume this is set after user login
+        let selectedReceiverId = null;
+
+
+        // Handle user registration
+        document.getElementById('registerForm').addEventListener('submit', function (event) {
+            event.preventDefault();
+            const username = document.getElementById('registerUsername').value;
+            const password = document.getElementById('registerPassword').value;
+
+            fetch('http://localhost:3000/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            })
+            .then(response => response.json())
+            .then(data => alert(data.message || data.error))
+            .catch(err => console.error('Error during registration:', err));
+        });
+
+        // Handle user login
+        document.getElementById('loginForm').addEventListener('submit', function (event) {
+    event.preventDefault();
+    const username = document.getElementById('loginUsername').value;
+    const password = document.getElementById('loginPassword').value;
+
+    fetch('http://localhost:3000/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.token) {
+            console.log("data", data)
+            token = data.token;
+            userId = data.userId; // Assuming your API returns the user ID in the response
+            alert('Login successful!');
+            document.getElementById('chatContainer').style.display = 'block'; // Show chat area
+            connectWebSocket(token); // Pass user ID to WebSocket connection
+        } else {
+            alert(data.error);
+        }
+    })
+    .catch(err => console.error('Error during login:', err));
+        });
+
+        // Establish WebSocket connection
+        function connectWebSocket(token) {
+    socket = new WebSocket('ws://localhost:3000'); // Adjust to your WebSocket server port
+
+    socket.onopen = () => {
+        console.log('WebSocket connection established', token);
+
+        // Send the user ID to the server for registration
+        const registerMessage = JSON.stringify({
+            type: 'register',
+            token: token
+        });
+        socket.send(registerMessage);
+        fetchUsers()
+    };
+
+    socket.onmessage = (event) => {
+        const receivedMessage = JSON.parse(event.data);
+        console.log("Received message", receivedMessage);
+
+        displayMessage(`${receivedMessage.senderId}: ${receivedMessage.message}`);
+    };
+
+    socket.onclose = () => {
+        console.log('WebSocket connection closed');
+    };
+}
+
+        // Function to display a message in the chat window
+        function displayMessage(message) {
+            const messageList = document.getElementById('messageList');
+            const newMessageDiv = document.createElement('div');
+            newMessageDiv.textContent = message;
+            messageList.appendChild(newMessageDiv);
+        }
+
+        // Function to fetch users and display them as radio buttons
+        function fetchUsers() {
+            fetch('http://localhost:3000/users')
+                .then(response => response.json())
+                .then(users => {
+                    const userList = document.getElementById('userList');
+                    users.forEach(user => {
+                        const label = document.createElement('label');
+                        label.textContent = user.username;
+                        const radio = document.createElement('input');
+                        radio.type = 'radio';
+                        radio.name = 'receiver';
+                        radio.value = user._id;
+                        radio.addEventListener('change', () => {
+                            selectedReceiverId = user._id; // Set selected receiver ID
+                        });
+                        label.prepend(radio);
+                        userList.appendChild(label);
+                        userList.appendChild(document.createElement('br'));
+                    });
+                })
+                .catch(err => console.error('Error fetching users:', err));
+        }
+
+        document.getElementById('sendMessage').addEventListener('click', function () {
+            const message = document.getElementById('messageInput').value;
+
+            if (selectedReceiverId && message) {
+                // Display the message locally
+                displayMessage(`You: ${message}`);
+                
+                // Clear input
+                document.getElementById('messageInput').value = '';
+
+                // Send message to the server via WebSocket
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    const msgObject = {
+                        senderId: token, // You can include the token or sender ID here
+                        receiverId: selectedReceiverId,
+                        message: message
+                    };
+                    socket.send(JSON.stringify(msgObject)); // Send via WebSocket
+                } else {
+                    console.error('WebSocket is not open');
+                }
+
+                // Optionally, send message to the REST API as well
+                fetch('http://localhost:3000/messages', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ token, message, receiverId: selectedReceiverId })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Message sent to API:', data);
+                })
+                .catch(err => console.error('Error sending message to API:', err));
+            } else {
+                alert('Please select a user and enter a message.');
+            }
+        });
+
+        // Initialize the app
+        // fetchUsers();
+        // connectWebSocket();
+    </script>
+</body>
+</html>
